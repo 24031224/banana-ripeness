@@ -1,0 +1,50 @@
+# Umbrales del clasificador de madurez de plátanos.
+#
+# ÚNICA fuente de verdad para cualquier número "mágico" del pipeline.
+# Nunca copies estos valores dentro del código: léelos con banana.config.load_thresholds().
+#
+# IMPORTANTE (OpenCV): H va de 0 a 179 (grados / 2), NO de 0 a 360.
+#   Para convertir un tono de una herramienta en grados: H_opencv = H_grados / 2.
+#   S y V van de 0 a 255.
+#
+# Los valores actuales son ESTIMACIONES INICIALES. Recalibrar con:
+#   python scripts/calibrate.py --dataset data/raw
+# y registrar el cambio en el commit (p. ej. "feat(config): recalibra brown_ratio con 120 fotos").
+
+version: 1
+
+preprocess:
+  target_width: 640          # px; se conserva la proporción
+  blur_kernel: 5             # impar; 1 = sin suavizado
+  white_balance: gray_world  # "none" | "gray_world"
+
+segmentation:
+  # Debe cubrir la cáscara verde, amarilla Y café (H 0-179).
+  # V mínimo bajo para no perder plátanos muy maduros/oscuros.
+  banana_hsv:
+    lower: [5, 40, 30]
+    upper: [90, 255, 255]
+  morph_kernel: 7            # impar
+  morph_iterations: 2
+  min_area_ratio: 0.02       # el plátano debe ocupar al menos 2 % de la imagen
+
+features:
+  hue_bins: 18               # 18 cubetas de 10 unidades sobre H 0-179
+  green:                     # ~70°-170° reales → 35-85 en OpenCV
+    lower: [36, 40, 40]
+    upper: [85, 255, 255]
+  yellow:                    # ~40°-70° reales → 20-35 en OpenCV
+    lower: [20, 60, 100]
+    upper: [35, 255, 255]
+  brown:                     # tonos naranja-rojizos con poco brillo
+    lower: [5, 40, 30]
+    upper: [20, 255, 150]
+  dark_spot_value_max: 60    # V < 60 cuenta como mancha oscura
+
+classifier:
+  # Regla 1 (prioridad alta): No comestible si se cumple cualquiera
+  no_comestible_brown_ratio_min: 0.40
+  no_comestible_dark_ratio_min: 0.25
+  # Regla 2: Inmaduro
+  inmaduro_green_ratio_min: 0.35
+  # Si ninguna regla aplica → Comestible

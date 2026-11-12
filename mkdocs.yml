@@ -1,0 +1,57 @@
+site_name: Clasificador de madurez de plátanos
+site_description: Visión por computadora clásica (OpenCV, HSV + reglas)
+docs_dir: docs
+
+theme:
+  name: material
+  language: es
+  features:
+    - navigation.sections
+    - content.code.copy
+  palette:
+    - scheme: default
+      primary: yellow
+      toggle: { icon: material/brightness-7, name: Modo oscuro }
+    - scheme: slate
+      primary: yellow
+      toggle: { icon: material/brightness-4, name: Modo claro }
+
+plugins:
+  - search:
+      lang: es
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+
+markdown_extensions:
+  - admonition
+  - toc: { permalink: true }
+  - pymdownx.highlight
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Inicio: index.md
+  - Arquitectura y contrato: arquitectura.md
+  - Configuración (umbrales): configuracion.md
+  - Cómo contribuir: contribuir.md
+  - Referencia de módulos:
+      - common: modulos/common.md
+      - config: modulos/config.md
+      - acquisition: modulos/acquisition.md
+      - preprocess: modulos/preprocess.md
+      - segmentation: modulos/segmentation.md
+      - features: modulos/features.md
+      - classifier: modulos/classifier.md
+      - pipeline: modulos/pipeline.md

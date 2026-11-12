@@ -1,0 +1,21 @@
+# Instala el paquete `banana` en modo editable (lee dependencias de pyproject.toml)
+-e .
+
+# Núcleo (también declarado en pyproject.toml)
+numpy>=1.26
+opencv-python-headless>=4.9
+PyYAML>=6.0
+
+# Interfaz
+streamlit>=1.35
+
+# Evaluación (métricas y matriz de confusión)
+scikit-learn>=1.4
+
+# Desarrollo
+pytest>=8.0
+ruff>=0.6
+
+# Documentación
+mkdocs-material>=9.5
+mkdocstrings[python]>=0.25
