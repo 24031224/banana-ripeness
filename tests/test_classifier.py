@@ -8,8 +8,10 @@ from banana.classifier import (
     LABEL_COLUMN,
     TREE_FEATURES,
     ClassifierError,
+    below_confidence,
     classify_rules,
     classify_tree,
+    exceed_confidence,
     export_tree_rules,
     feature_vector,
     margin_confidence,
@@ -90,6 +92,64 @@ def test_rules_confidence_grows_with_margin(thresholds: Thresholds) -> None:
     cerca = classify_rules(_fs(brown=0.41), thresholds.classifier)
     lejos = classify_rules(_fs(brown=0.95), thresholds.classifier)
     assert cerca.confidence < lejos.confidence
+
+
+def test_edible_banana_has_clear_confidence(thresholds: Thresholds) -> None:
+    """Caso reportado: verde 0%, amarillo 63%, marrón 22%, manchas 2%."""
+    v = classify_rules(_fs(green=0.0, yellow=0.63, brown=0.22, dark=0.02), thresholds.classifier)
+    assert v.label is Ripeness.COMESTIBLE
+    assert v.confidence > 0.7  # antes: 0.30
+    # media geométrica de (0.45, 0.92, 1.0)
+    assert v.confidence == pytest.approx((0.45 * 0.92 * 1.0) ** (1 / 3), abs=1e-3)
+
+
+def test_edible_confidence_monotonic_in_each_distance(thresholds: Thresholds) -> None:
+    base = classify_rules(_fs(brown=0.20, dark=0.10, green=0.10), thresholds.classifier)
+    for closer in (_fs(brown=0.30, dark=0.10, green=0.10), _fs(brown=0.20, dark=0.20, green=0.10)):
+        assert classify_rules(closer, thresholds.classifier).confidence < base.confidence
+    closer_green = classify_rules(_fs(brown=0.20, dark=0.10, green=0.30), thresholds.classifier)
+    assert closer_green.confidence < base.confidence
+
+
+def test_edible_confidence_extremes(thresholds: Thresholds) -> None:
+    assert classify_rules(_fs(yellow=1.0), thresholds.classifier).confidence == 1.0
+    near = classify_rules(_fs(brown=0.399), thresholds.classifier)
+    assert near.label is Ripeness.COMESTIBLE
+    assert near.confidence < 0.2  # (0.0025 · 1 · 1)^(1/3) ≈ 0.136
+
+
+def test_exceed_confidence_grows_with_margin(thresholds: Thresholds) -> None:
+    cfg = thresholds.classifier
+    values = [0.40, 0.5, 0.7, 1.0]
+    confs = [classify_rules(_fs(brown=b), cfg).confidence for b in values]
+    assert confs == sorted(confs)
+    assert confs[0] == 0.0
+    assert confs[-1] == 1.0
+    green = [classify_rules(_fs(green=g), cfg).confidence for g in (0.35, 0.6, 1.0)]
+    assert green == sorted(green)
+
+
+@pytest.mark.parametrize("value", [-0.5, 0.0, 0.2, 0.4, 0.9, 1.0, 2.0])
+@pytest.mark.parametrize("threshold", [0.0, 0.25, 0.4, 1.0])
+def test_confidence_helpers_in_unit_interval(value: float, threshold: float) -> None:
+    assert 0.0 <= exceed_confidence(value, threshold) <= 1.0
+    assert 0.0 <= below_confidence(value, threshold) <= 1.0
+
+
+def test_exceed_and_below_values() -> None:
+    assert exceed_confidence(0.70, 0.40) == pytest.approx(0.5)
+    assert exceed_confidence(0.30, 0.40) == 0.0
+    assert below_confidence(0.22, 0.40) == pytest.approx(0.45)
+    assert below_confidence(0.0, 0.40) == 1.0
+    assert below_confidence(0.40, 0.40) == 0.0
+
+
+@pytest.mark.parametrize("bad", [-0.1, 1.5])
+def test_exceed_below_reject_bad_threshold(bad: float) -> None:
+    with pytest.raises(ValueError):
+        exceed_confidence(0.5, bad)
+    with pytest.raises(ValueError):
+        below_confidence(0.5, bad)
 
 
 def test_confidence_zero_at_threshold() -> None:

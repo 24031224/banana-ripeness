@@ -11,6 +11,8 @@ Hay dos clasificadores con la misma salida (:class:`banana.common.Verdict`):
   3. **Comestible** en cualquier otro caso.
 
   Todos los umbrales vienen de ``config/thresholds.yaml`` (sección ``classifier``).
+  La confianza se calcula con :func:`exceed_confidence` (No comestible / Inmaduro) y
+  :func:`below_confidence` (Comestible); ver ``docs/modulos/classifier.md``.
 
 * **Árbol de decisión** (:func:`train_tree`, :func:`classify_tree`,
   :func:`export_tree_rules`), de profundidad máxima 3, entrenado con un CSV de
@@ -94,14 +96,79 @@ def margin_confidence(value: float, threshold: float) -> float:
     return min(abs(clipped - threshold) / max_distance, 1.0)
 
 
+def exceed_confidence(value: float, threshold: float) -> float:
+    """Margen con que ``value`` supera a ``threshold``, normalizado a [0, 1].
+
+    Fórmula: ``(value - threshold) / (1 - threshold)``. Vale 0 en el umbral y 1 en
+    ``value = 1``; es monótona creciente en ``value``. Si ``value`` no supera el
+    umbral devuelve 0.0.
+
+    Args:
+        value: Valor de la característica, en [0, 1].
+        threshold: Umbral de la regla, en [0, 1].
+
+    Returns:
+        Confianza en [0, 1].
+
+    Raises:
+        ValueError: Si ``threshold`` no está en [0, 1].
+
+    Examples:
+        >>> exceed_confidence(0.70, 0.40)
+        0.5
+        >>> exceed_confidence(0.30, 0.40)
+        0.0
+    """
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold debe estar en [0, 1], se recibió {threshold}")
+    clipped = min(max(value, 0.0), 1.0)
+    if clipped < threshold:
+        return 0.0
+    if threshold >= 1.0:  # umbral extremo: solo se cumple con value == 1
+        return 1.0
+    return (clipped - threshold) / (1.0 - threshold)
+
+
+def below_confidence(value: float, threshold: float) -> float:
+    """Distancia relativa de ``value`` por debajo de ``threshold``, en [0, 1].
+
+    Fórmula: ``(threshold - value) / threshold``. Vale 1 en ``value = 0`` y 0 en el
+    umbral; es monótona decreciente en ``value``. Si ``value`` alcanza el umbral
+    devuelve 0.0.
+
+    Args:
+        value: Valor de la característica, en [0, 1].
+        threshold: Umbral de la regla, en [0, 1].
+
+    Returns:
+        Confianza en [0, 1].
+
+    Raises:
+        ValueError: Si ``threshold`` no está en [0, 1].
+
+    Examples:
+        >>> below_confidence(0.22, 0.40)
+        0.45
+        >>> below_confidence(0.0, 0.40)
+        1.0
+    """
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError(f"threshold debe estar en [0, 1], se recibió {threshold}")
+    clipped = min(max(value, 0.0), 1.0)
+    if threshold <= 0.0 or clipped >= threshold:
+        return 0.0
+    return (threshold - clipped) / threshold
+
+
 def classify_rules(features: FeatureSet, cfg: ClassifierConfig) -> Verdict:
     """Aplica las reglas en orden y devuelve un veredicto explicable.
 
-    Prioridad: No comestible > Inmaduro > Comestible. La confianza es el margen
-    (:func:`margin_confidence`) de la regla decisiva; si dispararon varias reglas
-    de "No comestible" se usa la de mayor margen. Para "Comestible", que se asigna
-    cuando ninguna regla se cumple, es el menor margen de las tres reglas
-    descartadas (qué tan cerca estuvo de cambiar de clase).
+    Prioridad: No comestible > Inmaduro > Comestible. Para "No comestible" e
+    "Inmaduro" la confianza es el margen con que se supera el umbral
+    (:func:`exceed_confidence`); si dispararon varias reglas de "No comestible" se
+    usa la de mayor margen. Para "Comestible" es la media geométrica de la distancia
+    a los tres umbrales de las otras clases (:func:`below_confidence`): más lejos de
+    todos, más confianza, y cae a 0 si algún valor roza su umbral.
 
     Args:
         features: Características del plátano.
@@ -126,10 +193,10 @@ def classify_rules(features: FeatureSet, cfg: ClassifierConfig) -> Verdict:
     margins: list[float] = []
     if brown >= brown_min:
         reasons.append(f"brown_ratio={brown:.2f} >= {brown_min:.2f}")
-        margins.append(margin_confidence(brown, brown_min))
+        margins.append(exceed_confidence(brown, brown_min))
     if dark >= dark_min:
         reasons.append(f"dark_spot_ratio={dark:.2f} >= {dark_min:.2f}")
-        margins.append(margin_confidence(dark, dark_min))
+        margins.append(exceed_confidence(dark, dark_min))
     if reasons:
         return Verdict(Ripeness.NO_COMESTIBLE, max(margins), tuple(reasons), features)
 
@@ -137,19 +204,20 @@ def classify_rules(features: FeatureSet, cfg: ClassifierConfig) -> Verdict:
     if green >= green_min:
         return Verdict(
             Ripeness.INMADURO,
-            margin_confidence(green, green_min),
+            exceed_confidence(green, green_min),
             (f"green_ratio={green:.2f} >= {green_min:.2f}",),
             features,
         )
 
     # Regla 3: Comestible por descarte; se explica con las reglas que NO se cumplieron.
+    distances = (
+        below_confidence(brown, brown_min),
+        below_confidence(dark, dark_min),
+        below_confidence(green, green_min),
+    )
     return Verdict(
         Ripeness.COMESTIBLE,
-        min(
-            margin_confidence(brown, brown_min),
-            margin_confidence(dark, dark_min),
-            margin_confidence(green, green_min),
-        ),
+        float(np.prod(distances)) ** (1.0 / len(distances)),  # media geométrica
         (
             f"brown_ratio={brown:.2f} < {brown_min:.2f}",
             f"dark_spot_ratio={dark:.2f} < {dark_min:.2f}",

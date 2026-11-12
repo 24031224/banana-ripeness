@@ -46,6 +46,10 @@ def test_dataclasses_are_frozen() -> None:
         fs.green_ratio = 1.0  # type: ignore[misc]
 
 
+def test_other_ratio_defaults_to_zero() -> None:
+    assert _features().other_ratio == 0.0
+
+
 def test_verdict_holds_features() -> None:
     fs = _features()
     v = Verdict(label=Ripeness.COMESTIBLE, confidence=0.8, reasons=("ok",), features=fs)

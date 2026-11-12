@@ -10,6 +10,8 @@ aceptable, pero documenta cualquier caso donde no lo sea.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import cv2
 import numpy as np
 
@@ -68,6 +70,33 @@ def color_ratio(hsv: HSVImage, mask: Mask, hsv_range: HSVRange) -> float:
         return 0.0
     inside = cv2.bitwise_and(color_mask(hsv, hsv_range), mask)
     return float(cv2.countNonZero(inside)) / banana_pixels
+
+
+def other_ratio(hsv: HSVImage, mask: Mask, ranges: Sequence[HSVRange]) -> float:
+    """Fracción de píxeles del plátano que no caen en ninguno de los rangos dados.
+
+    Los rangos pueden solaparse (p. ej. amarillo y café comparten H=20), por eso se
+    cuenta la unión de las máscaras y no se resta la suma de proporciones.
+
+    Args:
+        hsv: Imagen HSV de OpenCV (H en 0-179).
+        mask: Máscara 0/255 del plátano.
+        ranges: Rangos HSV considerados "conocidos" (verde, amarillo, café).
+
+    Returns:
+        Proporción en [0, 1]; 0.0 si la máscara está vacía.
+
+    Examples:
+        >>> otros = other_ratio(hsv, seg.mask, (cfg.green, cfg.yellow, cfg.brown))
+    """
+    banana_pixels = int(cv2.countNonZero(mask))
+    if banana_pixels == 0:
+        return 0.0
+    known = np.zeros(mask.shape, dtype=np.uint8)
+    for hsv_range in ranges:
+        known = cv2.bitwise_or(known, color_mask(hsv, hsv_range))
+    covered = cv2.countNonZero(cv2.bitwise_and(known, mask))
+    return float(banana_pixels - covered) / banana_pixels
 
 
 def dark_spot_ratio(hsv: HSVImage, mask: Mask, value_max: int) -> float:
@@ -150,4 +179,5 @@ def extract_features(hsv: HSVImage, segmentation: Segmentation, cfg: FeaturesCon
         brown_ratio=color_ratio(hsv, mask, cfg.brown),
         dark_spot_ratio=dark_spot_ratio(hsv, mask, cfg.dark_spot_value_max),
         hue_histogram=hue_histogram(hsv, mask, cfg.hue_bins),
+        other_ratio=other_ratio(hsv, mask, (cfg.green, cfg.yellow, cfg.brown)),
     )

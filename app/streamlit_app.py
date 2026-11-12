@@ -222,6 +222,7 @@ def render_result(result: PipelineResult) -> None:
     _ratio_bar("🟢 Verde", features.green_ratio, "#2ECC40")
     _ratio_bar("🟡 Amarillo", features.yellow_ratio, "#FFDC00")
     _ratio_bar("🟤 Marrón", features.brown_ratio, "#8B4513")
+    _ratio_bar("⚪ Otros", features.other_ratio, "#9E9E9E")
 
     with st.expander("❓ ¿Por qué?"):
         st.markdown("**Reglas disparadas:**")

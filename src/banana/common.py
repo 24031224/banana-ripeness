@@ -160,6 +160,9 @@ class FeatureSet:
         dark_spot_ratio: Fracción de píxeles con V menor al umbral de manchas.
         hue_histogram: Histograma de H normalizado (suma 1) con ``hue_bins``
             cubetas sobre 0-179.
+        other_ratio: Fracción de píxeles de la máscara que no caen en verde,
+            amarillo ni marrón (unión de los tres rangos, sin doble conteo).
+            Vale 0.0 por defecto.
     """
 
     hue_mean: float
@@ -171,6 +174,7 @@ class FeatureSet:
     brown_ratio: float
     dark_spot_ratio: float
     hue_histogram: tuple[float, ...]
+    other_ratio: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)

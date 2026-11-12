@@ -37,10 +37,44 @@ Errores: `ClassifierError` (hereda de `BananaError`) si el CSV es inválido.
 
 ### Confianza
 
-`margin_confidence(valor, umbral)` = `|valor - umbral| / max(umbral, 1 - umbral)`,
-en [0, 1]: 0 exactamente en el umbral y 1 en el extremo opuesto. Para
-"No comestible" se toma la regla disparada de mayor margen; para "Comestible",
-el menor margen de las tres reglas descartadas (qué tan cerca estuvo de cambiar).
+La confianza está siempre en [0, 1] y es monótona respecto a las distancias a los
+umbrales (`brown_min`, `dark_min`, `green_min`, de `config/thresholds.yaml`).
+
+**No comestible / Inmaduro** — margen con que se supera el umbral:
+
+`exceed_confidence(v, t) = (v - t) / (1 - t)`  (0 en el umbral, 1 en `v = 1`).
+Con varias reglas de "No comestible" disparadas se toma la de mayor margen.
+
+**Comestible** — qué tan lejos está de los umbrales de las otras clases. Para cada
+uno: `below_confidence(v, t) = (t - v) / t` (1 en `v = 0`, 0 en el umbral). La
+confianza es la **media geométrica** de las tres distancias:
+
+`conf = (d_marrón · d_manchas · d_verde) ^ (1/3)`
+
+La media geométrica sube cuando cualquiera de las tres se aleja de su umbral y cae
+a 0 si alguna toca el suyo (en ese punto el plátano ya cambiaría de clase).
+
+**Ejemplo** (verde 0 %, amarillo 63 %, marrón 22 %, manchas 2 %; umbrales 0.40,
+0.25 y 0.35):
+
+| Regla | Valor | Umbral | Distancia |
+|---|---|---|---|
+| marrón | 0.22 | 0.40 | (0.40 − 0.22) / 0.40 = 0.45 |
+| manchas | 0.02 | 0.25 | (0.25 − 0.02) / 0.25 = 0.92 |
+| verde | 0.00 | 0.35 | (0.35 − 0.00) / 0.35 = 1.00 |
+
+Confianza = (0.45 · 0.92 · 1.00)^(1/3) ≈ **0.75**. Con la fórmula anterior
+(`min` de márgenes normalizados por `max(t, 1 − t)`) daba 0.30.
+
+`margin_confidence` (margen simétrico respecto al umbral) se conserva como utilidad
+pública, pero `classify_rules` ya no la usa.
+
+### Porcentaje de "otros"
+
+`FeatureSet.other_ratio` es la fracción de píxeles de la máscara que no caen en
+verde, amarillo ni marrón. Se calcula en `banana.features.other_ratio` con la unión
+de los tres rangos (se solapan, así que no es `1 - suma`), y la UI lo muestra como
+cuarta barra "Otros".
 
 ```python
 from banana.classifier import classify_rules
@@ -79,8 +113,8 @@ verdict = classify_tree(tree, features)  # reasons = camino raíz → hoja
   `config/thresholds.yaml`; el proyecto no usa deep learning como método principal.
 - **Prioridad No comestible > Inmaduro > Comestible:** un plátano con manchas
   oscuras es un riesgo aunque tenga algo de verde, así que se descarta primero.
-- **Confianza por margen al umbral:** es simple y refleja qué tan cerca estuvo la
-  decisión de cambiar de clase, sin necesidad de probabilidades entrenadas.
+- **Confianza por distancia a los umbrales:** es simple y refleja qué tan cerca estuvo
+  la decisión de cambiar de clase, sin necesidad de probabilidades entrenadas.
 - **Árbol con `max_depth=3` y semilla fija:** se mantiene legible
   (`export_tree_rules`) y reproducible; solo sirve para comparar e inspirar umbrales.
 - **`sklearn` se importa dentro de las funciones:** las reglas funcionan sin cargar

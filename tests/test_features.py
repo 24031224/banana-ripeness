@@ -12,6 +12,7 @@ from banana.features import (
     extract_features,
     hsv_stats,
     hue_histogram,
+    other_ratio,
 )
 
 
@@ -99,6 +100,32 @@ def test_extract_features_fields_are_consistent(
     assert len(fs.hue_histogram) == thresholds.features.hue_bins
     assert sum(fs.hue_histogram) == pytest.approx(1.0)
     assert fs.green_ratio > 0.9
+
+
+def test_other_ratio_counts_union_without_double_counting() -> None:
+    green = HSVRange(lower=(36, 40, 40), upper=(85, 255, 255))
+    yellow = HSVRange(lower=(20, 60, 100), upper=(35, 255, 255))
+    hsv = np.zeros((10, 10, 3), dtype=np.uint8)
+    hsv[:] = (55, 200, 170)  # verde (H en 0-179)
+    hsv[:3] = (27, 200, 200)  # amarillo: 30 %
+    hsv[3:5] = (120, 200, 200)  # azul, fuera de todos los rangos: 20 %
+    mask = np.full((10, 10), 255, dtype=np.uint8)
+    assert other_ratio(hsv, mask, (green, yellow)) == pytest.approx(0.2)
+    # rangos solapados (el mismo dos veces) no cambian el resultado
+    assert other_ratio(hsv, mask, (green, yellow, yellow)) == pytest.approx(0.2)
+
+
+def test_other_ratio_empty_mask_is_zero(yellow_banana: BGRImage, thresholds: Thresholds) -> None:
+    hsv = cv2.cvtColor(yellow_banana, cv2.COLOR_BGR2HSV)
+    empty = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    assert other_ratio(hsv, empty, (thresholds.features.green,)) == 0.0
+
+
+def test_extract_features_other_ratio(yellow_banana: BGRImage, thresholds: Thresholds) -> None:
+    hsv, seg = _seg_from_color(yellow_banana)
+    fs = extract_features(hsv, seg, thresholds.features)
+    assert 0.0 <= fs.other_ratio <= 1.0
+    assert fs.other_ratio < 0.1  # casi todo es amarillo
 
 
 def test_extract_features_ratios_in_unit_interval(
