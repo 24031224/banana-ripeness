@@ -7,7 +7,10 @@ plátano muy maduro queda fuera de la máscara, el clasificador nunca lo verá c
 
 from __future__ import annotations
 
-from banana.common import HSVImage, HSVRange, Mask, Segmentation
+import cv2
+import numpy as np
+
+from banana.common import HSVImage, HSVRange, Mask, Segmentation, SegmentationError
 from banana.config import SegmentationConfig
 
 
@@ -26,7 +29,10 @@ def color_mask(hsv: HSVImage, hsv_range: HSVRange) -> Mask:
         >>> set(np.unique(m)) <= {0, 255}
         True
     """
-    raise NotImplementedError
+    lower = np.array(hsv_range.lower, dtype=np.uint8)  # H en 0-179
+    upper = np.array(hsv_range.upper, dtype=np.uint8)  # H en 0-179
+    mask: Mask = cv2.inRange(hsv, lower, upper)
+    return mask
 
 
 def clean_mask(mask: Mask, kernel_size: int, iterations: int) -> Mask:
@@ -46,7 +52,16 @@ def clean_mask(mask: Mask, kernel_size: int, iterations: int) -> Mask:
     Examples:
         >>> limpia = clean_mask(m, 7, 2)
     """
-    raise NotImplementedError
+    if kernel_size < 1 or kernel_size % 2 == 0:
+        raise ValueError(f"kernel_size debe ser impar y >= 1, se recibió {kernel_size}")
+    if iterations < 0:
+        raise ValueError(f"iterations debe ser >= 0, se recibió {iterations}")
+    if iterations == 0:
+        return mask.copy()
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    opened = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=iterations)
+    closed: Mask = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel, iterations=iterations)
+    return closed
 
 
 def largest_component(mask: Mask) -> Mask:
@@ -61,7 +76,13 @@ def largest_component(mask: Mask) -> Mask:
     Examples:
         >>> unico = largest_component(limpia)
     """
-    raise NotImplementedError
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    result: Mask = np.zeros_like(mask)
+    if not contours:
+        return result
+    largest = max(contours, key=cv2.contourArea)
+    cv2.drawContours(result, [largest], -1, 255, cv2.FILLED)
+    return result
 
 
 def segment(hsv: HSVImage, cfg: SegmentationConfig) -> Segmentation:
@@ -82,4 +103,19 @@ def segment(hsv: HSVImage, cfg: SegmentationConfig) -> Segmentation:
         >>> 0.0 < seg.area_ratio <= 1.0
         True
     """
-    raise NotImplementedError
+    raw = color_mask(hsv, cfg.banana_hsv)
+    cleaned = clean_mask(raw, cfg.morph_kernel, cfg.morph_iterations)
+    mask = largest_component(cleaned)
+
+    area_px = int(cv2.countNonZero(mask))
+    area_ratio = area_px / float(mask.shape[0] * mask.shape[1])
+    if area_px == 0:
+        raise SegmentationError("No se detectó un plátano en la imagen.")
+    if area_ratio < cfg.min_area_ratio:
+        raise SegmentationError(
+            f"El plátano ocupa solo {area_ratio:.1%} de la imagen "
+            f"(mínimo {cfg.min_area_ratio:.1%})."
+        )
+
+    x, y, w, h = cv2.boundingRect(mask)
+    return Segmentation(mask=mask, bbox=(x, y, w, h), area_px=area_px, area_ratio=area_ratio)

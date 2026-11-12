@@ -9,10 +9,6 @@ from banana.common import BGRImage, ImageLoadError, Ripeness, SegmentationError
 from banana.config import Thresholds
 from banana.pipeline import BananaPipeline, analyze, overlay_mask
 
-# Las etapas previas (config, preprocess, segmentation, features) pueden estar aún sin
-# implementar; estos tests pasan a ser obligatorios cuando lo estén.
-pending_stages = pytest.mark.xfail(raises=NotImplementedError, reason="Etapas previas pendientes")
-
 _CASES = [
     ("green_banana", Ripeness.INMADURO),
     ("yellow_banana", Ripeness.COMESTIBLE),
@@ -20,7 +16,6 @@ _CASES = [
 ]
 
 
-@pending_stages
 @pytest.mark.parametrize(("fixture_name", "expected"), _CASES)
 def test_end_to_end(
     fixture_name: str,
@@ -34,18 +29,15 @@ def test_end_to_end(
     assert result.segmentation.mask.shape == result.preprocessed.hsv.shape[:2]
 
 
-@pending_stages
 def test_no_banana_raises(empty_image: BGRImage, thresholds: Thresholds) -> None:
     with pytest.raises(SegmentationError):
         BananaPipeline(thresholds).run(empty_image)
 
 
-@pending_stages
 def test_from_yaml_default() -> None:
     assert isinstance(BananaPipeline.from_yaml(), BananaPipeline)
 
 
-@pending_stages
 @pytest.mark.parametrize(("fixture_name", "expected"), _CASES)
 def test_analyze_from_array(
     fixture_name: str,

@@ -4,7 +4,7 @@ import cv2
 import numpy as np
 import pytest
 
-from banana.common import BGRImage, Segmentation
+from banana.common import BGRImage, HSVRange, Segmentation
 from banana.config import Thresholds
 from banana.features import (
     color_ratio,
@@ -13,8 +13,6 @@ from banana.features import (
     hsv_stats,
     hue_histogram,
 )
-
-pytestmark = pytest.mark.xfail(raises=NotImplementedError, reason="Esqueleto: pendiente")
 
 
 def _seg_from_color(img: BGRImage) -> tuple[np.ndarray, Segmentation]:
@@ -47,6 +45,60 @@ def test_hsv_stats_hue_in_opencv_scale(yellow_banana: BGRImage) -> None:
     hsv, seg = _seg_from_color(yellow_banana)
     h_mean, _, _, _ = hsv_stats(hsv, seg.mask)
     assert 20 <= h_mean <= 35  # amarillo en escala 0-179
+
+
+def test_empty_mask_gives_zero_ratios_and_histogram(
+    yellow_banana: BGRImage, thresholds: Thresholds
+) -> None:
+    hsv = cv2.cvtColor(yellow_banana, cv2.COLOR_BGR2HSV)
+    empty = np.zeros(hsv.shape[:2], dtype=np.uint8)
+    assert color_ratio(hsv, empty, thresholds.features.yellow) == 0.0
+    assert dark_spot_ratio(hsv, empty, 60) == 0.0
+    assert hue_histogram(hsv, empty, 18) == (0.0,) * 18
+
+
+def test_hsv_stats_empty_mask_raises(yellow_banana: BGRImage) -> None:
+    hsv = cv2.cvtColor(yellow_banana, cv2.COLOR_BGR2HSV)
+    with pytest.raises(ValueError):
+        hsv_stats(hsv, np.zeros(hsv.shape[:2], dtype=np.uint8))
+
+
+def test_histogram_rejects_non_positive_bins(yellow_banana: BGRImage) -> None:
+    hsv, seg = _seg_from_color(yellow_banana)
+    with pytest.raises(ValueError):
+        hue_histogram(hsv, seg.mask, 0)
+
+
+def test_histogram_peak_in_yellow_bin(yellow_banana: BGRImage) -> None:
+    hsv, seg = _seg_from_color(yellow_banana)
+    h = hue_histogram(hsv, seg.mask, 18)  # cubetas de 10 sobre H 0-179
+    assert int(np.argmax(h)) == 2  # H≈27 cae en la cubeta 20-29
+
+
+def test_dark_spots_detected_on_dark_pixels() -> None:
+    hsv = np.full((10, 10, 3), (12, 180, 200), dtype=np.uint8)
+    hsv[:5] = (12, 180, 20)  # mitad superior oscura (V=20)
+    mask = np.full((10, 10), 255, dtype=np.uint8)
+    assert dark_spot_ratio(hsv, mask, 60) == pytest.approx(0.5)
+
+
+def test_color_ratio_ignores_pixels_outside_mask() -> None:
+    hsv = np.full((10, 10, 3), (55, 200, 170), dtype=np.uint8)  # todo verde (H 0-179)
+    mask = np.zeros((10, 10), dtype=np.uint8)
+    mask[:5] = 255
+    green = HSVRange(lower=(36, 40, 40), upper=(85, 255, 255))
+    assert color_ratio(hsv, mask, green) == pytest.approx(1.0)
+
+
+def test_extract_features_fields_are_consistent(
+    green_banana: BGRImage, thresholds: Thresholds
+) -> None:
+    hsv, seg = _seg_from_color(green_banana)
+    fs = extract_features(hsv, seg, thresholds.features)
+    assert 36 <= fs.hue_mean <= 85
+    assert len(fs.hue_histogram) == thresholds.features.hue_bins
+    assert sum(fs.hue_histogram) == pytest.approx(1.0)
+    assert fs.green_ratio > 0.9
 
 
 def test_extract_features_ratios_in_unit_interval(
