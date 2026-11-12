@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import cv2
 import numpy as np
 import pytest
@@ -8,7 +10,47 @@ from banana.common import BGRImage, SegmentationError
 from banana.config import Thresholds
 from banana.segmentation import clean_mask, color_mask, largest_component, segment
 
-pytestmark = pytest.mark.xfail(raises=NotImplementedError, reason="Esqueleto: pendiente")
+
+def test_segment_bbox_matches_mask(yellow_banana: BGRImage, thresholds: Thresholds) -> None:
+    seg = segment(cv2.cvtColor(yellow_banana, cv2.COLOR_BGR2HSV), thresholds.segmentation)
+    x, y, w, h = seg.bbox
+    assert w > h > 0  # la elipse sintética es alargada
+    outside = seg.mask.copy()
+    outside[y : y + h, x : x + w] = 0
+    assert outside.sum() == 0  # nada de máscara fuera de la caja
+    assert seg.area_ratio == pytest.approx(seg.area_px / seg.mask.size)
+
+
+def test_segment_too_small_raises(yellow_banana: BGRImage, thresholds: Thresholds) -> None:
+    cfg = replace(thresholds.segmentation, min_area_ratio=0.99)
+    with pytest.raises(SegmentationError):
+        segment(cv2.cvtColor(yellow_banana, cv2.COLOR_BGR2HSV), cfg)
+
+
+def test_clean_mask_zero_iterations_is_copy() -> None:
+    m = np.zeros((20, 20), dtype=np.uint8)
+    m[10, 10] = 255
+    out = clean_mask(m, 3, 0)
+    assert out is not m
+    assert np.array_equal(out, m)
+
+
+@pytest.mark.parametrize(("kernel", "iterations"), [(4, 1), (0, 1), (3, -1)])
+def test_clean_mask_rejects_invalid_params(kernel: int, iterations: int) -> None:
+    with pytest.raises(ValueError):
+        clean_mask(np.zeros((10, 10), dtype=np.uint8), kernel, iterations)
+
+
+def test_largest_component_empty_mask_returns_zeros() -> None:
+    out = largest_component(np.zeros((10, 10), dtype=np.uint8))
+    assert out.sum() == 0
+
+
+def test_largest_component_fills_holes() -> None:
+    m = np.zeros((50, 50), dtype=np.uint8)
+    m[10:40, 10:40] = 255
+    m[20:30, 20:30] = 0  # hueco interior
+    assert largest_component(m)[25, 25] == 255
 
 
 @pytest.mark.parametrize("fixture_name", ["green_banana", "yellow_banana", "brown_banana"])

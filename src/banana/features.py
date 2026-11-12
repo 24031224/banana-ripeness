@@ -10,8 +10,15 @@ aceptable, pero documenta cualquier caso donde no lo sea.
 
 from __future__ import annotations
 
+import cv2
+import numpy as np
+
 from banana.common import FeatureSet, HSVImage, HSVRange, Mask, Segmentation
 from banana.config import FeaturesConfig
+from banana.segmentation import color_mask
+
+_HUE_RANGE_END = 180
+"""Límite superior exclusivo de H en OpenCV (H va de 0 a 179)."""
 
 
 def hue_histogram(hsv: HSVImage, mask: Mask, bins: int) -> tuple[float, ...]:
@@ -33,7 +40,13 @@ def hue_histogram(hsv: HSVImage, mask: Mask, bins: int) -> tuple[float, ...]:
         >>> round(sum(h), 6)
         1.0
     """
-    raise NotImplementedError
+    if bins <= 0:
+        raise ValueError(f"bins debe ser > 0, se recibió {bins}")
+    hist = cv2.calcHist([hsv], [0], mask, [bins], [0, _HUE_RANGE_END]).flatten()  # H en 0-179
+    total = float(hist.sum())
+    if total == 0.0:
+        return (0.0,) * bins
+    return tuple(float(v) for v in hist / total)
 
 
 def color_ratio(hsv: HSVImage, mask: Mask, hsv_range: HSVRange) -> float:
@@ -50,7 +63,11 @@ def color_ratio(hsv: HSVImage, mask: Mask, hsv_range: HSVRange) -> float:
     Examples:
         >>> verde = color_ratio(hsv, seg.mask, cfg.green)
     """
-    raise NotImplementedError
+    banana_pixels = int(cv2.countNonZero(mask))
+    if banana_pixels == 0:
+        return 0.0
+    inside = cv2.bitwise_and(color_mask(hsv, hsv_range), mask)
+    return float(cv2.countNonZero(inside)) / banana_pixels
 
 
 def dark_spot_ratio(hsv: HSVImage, mask: Mask, value_max: int) -> float:
@@ -67,7 +84,11 @@ def dark_spot_ratio(hsv: HSVImage, mask: Mask, value_max: int) -> float:
     Examples:
         >>> manchas = dark_spot_ratio(hsv, seg.mask, cfg.dark_spot_value_max)
     """
-    raise NotImplementedError
+    banana_pixels = int(cv2.countNonZero(mask))
+    if banana_pixels == 0:
+        return 0.0
+    dark = (hsv[:, :, 2] < value_max) & (mask == 255)  # V en 0-255
+    return float(np.count_nonzero(dark)) / banana_pixels
 
 
 def hsv_stats(hsv: HSVImage, mask: Mask) -> tuple[float, float, float, float]:
@@ -86,7 +107,16 @@ def hsv_stats(hsv: HSVImage, mask: Mask) -> tuple[float, float, float, float]:
     Examples:
         >>> h_mean, h_std, s_mean, v_mean = hsv_stats(hsv, seg.mask)
     """
-    raise NotImplementedError
+    inside = hsv[mask == 255]
+    if inside.shape[0] == 0:
+        raise ValueError("La máscara está vacía: no hay píxeles de plátano.")
+    hue = inside[:, 0].astype(np.float64)  # H en 0-179
+    return (
+        float(hue.mean()),
+        float(hue.std()),
+        float(inside[:, 1].mean()),
+        float(inside[:, 2].mean()),
+    )
 
 
 def extract_features(hsv: HSVImage, segmentation: Segmentation, cfg: FeaturesConfig) -> FeatureSet:
@@ -100,9 +130,24 @@ def extract_features(hsv: HSVImage, segmentation: Segmentation, cfg: FeaturesCon
     Returns:
         ``FeatureSet`` con estadísticos, proporciones de color e histograma.
 
+    Raises:
+        ValueError: Si la máscara de ``segmentation`` está vacía.
+
     Examples:
         >>> fs = extract_features(pre.hsv, seg, thresholds.features)
         >>> 0.0 <= fs.green_ratio <= 1.0
         True
     """
-    raise NotImplementedError
+    mask = segmentation.mask
+    hue_mean, hue_std, saturation_mean, value_mean = hsv_stats(hsv, mask)
+    return FeatureSet(
+        hue_mean=hue_mean,
+        hue_std=hue_std,
+        saturation_mean=saturation_mean,
+        value_mean=value_mean,
+        green_ratio=color_ratio(hsv, mask, cfg.green),
+        yellow_ratio=color_ratio(hsv, mask, cfg.yellow),
+        brown_ratio=color_ratio(hsv, mask, cfg.brown),
+        dark_spot_ratio=dark_spot_ratio(hsv, mask, cfg.dark_spot_value_max),
+        hue_histogram=hue_histogram(hsv, mask, cfg.hue_bins),
+    )

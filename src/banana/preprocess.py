@@ -6,8 +6,14 @@ Recordatorio: ``cv2.cvtColor(img, cv2.COLOR_BGR2HSV)`` produce H en 0-179, no 0-
 
 from __future__ import annotations
 
+import cv2
+import numpy as np
+
 from banana.common import BGRImage, HSVImage, PreprocessedImage
 from banana.config import PreprocessConfig, WhiteBalanceMethod
+
+_EPSILON = 1e-6
+"""Evita dividir entre cero al escalar canales de media nula (no es un umbral de color)."""
 
 
 def resize_to_width(image: BGRImage, target_width: int) -> tuple[BGRImage, float]:
@@ -28,7 +34,13 @@ def resize_to_width(image: BGRImage, target_width: int) -> tuple[BGRImage, float
         >>> small.shape[1]
         640
     """
-    raise NotImplementedError
+    if target_width <= 0:
+        raise ValueError(f"target_width debe ser > 0, se recibió {target_width}")
+    height, width = image.shape[:2]
+    scale = target_width / width
+    new_height = max(1, int(height * scale))
+    resized: BGRImage = cv2.resize(image, (target_width, new_height), interpolation=cv2.INTER_AREA)
+    return resized, scale
 
 
 def denoise(image: BGRImage, kernel_size: int) -> BGRImage:
@@ -47,7 +59,12 @@ def denoise(image: BGRImage, kernel_size: int) -> BGRImage:
     Examples:
         >>> smooth = denoise(img, 5)
     """
-    raise NotImplementedError
+    if kernel_size < 1 or kernel_size % 2 == 0:
+        raise ValueError(f"kernel_size debe ser impar y >= 1, se recibió {kernel_size}")
+    if kernel_size == 1:
+        return image.copy()
+    blurred: BGRImage = cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+    return blurred
 
 
 def apply_white_balance(image: BGRImage, method: WhiteBalanceMethod) -> BGRImage:
@@ -69,7 +86,18 @@ def apply_white_balance(image: BGRImage, method: WhiteBalanceMethod) -> BGRImage
     Examples:
         >>> balanced = apply_white_balance(img, "gray_world")
     """
-    raise NotImplementedError
+    if method == "none":
+        return image.copy()
+    if method != "gray_world":
+        raise ValueError(f"Método de balance de blancos no soportado: {method!r}")
+
+    channel_means = image.mean(axis=(0, 1))
+    global_mean = float(channel_means.mean())
+    if global_mean <= 0:
+        return image.copy()  # imagen completamente negra: no hay nada que corregir
+    gains = global_mean / (channel_means + _EPSILON)
+    balanced = np.clip(image * gains[np.newaxis, np.newaxis, :], 0, 255).astype(np.uint8)
+    return balanced
 
 
 def to_hsv(image: BGRImage) -> HSVImage:
@@ -88,7 +116,8 @@ def to_hsv(image: BGRImage) -> HSVImage:
         >>> int(hsv[..., 0].max()) <= 179
         True
     """
-    raise NotImplementedError
+    hsv: HSVImage = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)  # H en 0-179
+    return hsv
 
 
 def preprocess(image: BGRImage, cfg: PreprocessConfig) -> PreprocessedImage:
@@ -106,4 +135,7 @@ def preprocess(image: BGRImage, cfg: PreprocessConfig) -> PreprocessedImage:
         >>> pre.hsv.shape == pre.bgr.shape
         True
     """
-    raise NotImplementedError
+    resized, scale = resize_to_width(image, cfg.target_width)
+    smooth = denoise(resized, cfg.blur_kernel)
+    balanced = apply_white_balance(smooth, cfg.white_balance)
+    return PreprocessedImage(bgr=balanced, hsv=to_hsv(balanced), scale=scale)
