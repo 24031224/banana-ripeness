@@ -22,7 +22,7 @@ plugins:
   - mkdocstrings:
       handlers:
         python:
-          paths: [src]
+          paths: [src, scripts]
           options:
             docstring_style: google
             show_source: true
@@ -55,3 +55,4 @@ nav:
       - features: modulos/features.md
       - classifier: modulos/classifier.md
       - pipeline: modulos/pipeline.md
+      - scripts: modulos/scripts.md
